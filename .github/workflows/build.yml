@@ -1,0 +1,52 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack project zip
+        run: |
+          shopt -s nullglob
+          for z in *.zip; do mkdir -p unpacked && unzip -q -o "$z" -d unpacked; done
+
+      - name: Find project
+        run: |
+          P=$(find . -name project.yml -not -path "./.git/*" | head -n 1)
+          if [ -z "$P" ]; then echo "project.yml not found"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$P")" >> "$GITHUB_ENV"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: xcodegen generate
+
+      - name: Build (no signing)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          xcodebuild -project WheelieRush.xcodeproj -scheme WheelieRush \
+            -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          rm -rf Payload WheelieRush.ipa
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/WheelieRush.app Payload/
+          zip -qr WheelieRush.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WheelieRush-IPA
+          path: ${{ env.PROJECT_DIR }}/WheelieRush.ipa
